@@ -28,3 +28,26 @@ jobs:
       - name: Isolated Linux TCP/UDP source IP and Snell startup tests
         run: |
           sudo env SNELL_TEST_V5=/tmp/snell-test-v5/snell-server SNELL_TEST_V6=/tmp/snell-test-v6/snell-server unshare --net bash tests/network.sh
+      - name: Startup helper privileges under systemd hardening
+        run: |
+          trap 'sudo rm -f /etc/snell-ip-preflight-test /etc/systemd/system/snell-ip-preflight.service; sudo systemctl daemon-reload' EXIT
+          cat > /tmp/snell-ip-preflight.service <<'EOF'
+          [Service]
+          Type=oneshot
+          User=nobody
+          Group=nogroup
+          NoNewPrivileges=yes
+          PrivateTmp=yes
+          ProtectSystem=strict
+          ProtectHome=yes
+          AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+          CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+          RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
+          ExecStartPre=+/usr/sbin/nft list tables
+          ExecStartPre=+/usr/bin/touch /etc/snell-ip-preflight-test
+          ExecStart=/usr/bin/true
+          EOF
+          sudo install -m 644 /tmp/snell-ip-preflight.service /etc/systemd/system/snell-ip-preflight.service
+          sudo systemctl daemon-reload
+          sudo systemctl start snell-ip-preflight.service
+          sudo test -f /etc/snell-ip-preflight-test
