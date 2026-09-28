@@ -6,6 +6,25 @@
 # 描述: 这个脚本用于管理 Snell 代理的多用户配置
 # =========================================
 
+# txehq public-IP manager. Fetch to a private file and validate before execution.
+run_ip_manager() {
+    local payload result
+    payload=$(mktemp) || return 1
+    if ! curl -fLsS --retry 2 --connect-timeout 10 --max-time 60 \
+        https://raw.githubusercontent.com/txehq/snell.sh/main/ip-binding.sh -o "$payload" \
+        || ! test -s "$payload" || ! bash -n "$payload"; then
+        rm -f "$payload"
+        return 1
+    fi
+    bash "$payload" "$@"
+    result=$?
+    rm -f "$payload"
+    return "$result"
+}
+case "${1:-}" in
+    ips|bind-ip|add|profile|ip-menu) run_ip_manager "$@"; exit $? ;;
+esac
+
 # 定义颜色代码
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -754,6 +773,14 @@ print_surge_line() {
     local psk="$4"
     local installed_version="$5"
 
+    local bound_ip
+    bound_ip=$(sed -n 's/^#txehq-bind-ip = //p' "$(snell_conf_for_port "$port")" 2>/dev/null | head -n1)
+    if [ -n "$bound_ip" ]; then
+        [[ "$ip_addr" == *:* ]] && return 0
+        ip_addr="$bound_ip"
+        country="Snell-${port}-${bound_ip}"
+    fi
+
     if [ "$installed_version" = "v6" ]; then
         echo -e "${GREEN}${country} = snell, ${ip_addr}, ${port}, psk = ${psk}, version = 6, mode = $(get_snell_mode "$(snell_conf_for_port "$port")"), reuse = true, tfo = true${RESET}"
     elif [ "$installed_version" = "v5" ]; then
@@ -1343,6 +1370,10 @@ switch_user_conf_version() {
         return 1
     fi
 
+    if [[ "$target_version" == v4 ]] && grep -q '^#txehq-bind-ip = ' "$conf_file"; then
+        echo "公网 IP 绑定需要 Snell v5/v6，未切换到 v4。"
+        return 1
+    fi
     current_version=$(get_conf_snell_version "$conf_file")
     if [ "$current_version" = "$target_version" ]; then
         echo -e "${YELLOW}该用户已经在 ${target_version} 通道，无需切换${RESET}"
@@ -1432,6 +1463,12 @@ switch_user_conf_version() {
 
 # 添加新用户
 add_user() {
+    local bind_choice
+    read -rp "按公网 IP 创建新用户 (v5/v6，独立出口及新 PSK)? [Y/n]: " bind_choice || return 1
+    if [[ "$bind_choice" != n && "$bind_choice" != N ]]; then
+        run_ip_manager add
+        return $?
+    fi
     # 并发锁（函数返回时自动释放）；重置 IPV6_ENABLE，避免沿用上次调用的残留值
     multi_user_lock || return 1
     trap 'multi_user_unlock' RETURN
@@ -1566,6 +1603,10 @@ delete_user() {
         systemctl stop "$service_name" 2>/dev/null || true
         systemctl disable "$service_name" 2>/dev/null || true
 
+        if [ -f "/etc/snell-ip-bindings/${del_port}.json" ]; then
+            /usr/local/lib/snell/ip-binding.sh cleanup "$del_port" || return 1
+        fi
+
         # 删除服务文件
         rm -f "${SYSTEMD_DIR}/${service_name}.service"
         rm -f "/lib/systemd/system/${service_name}.service"
@@ -1620,6 +1661,10 @@ modify_user() {
         read -rp "请输入选项 [0-4]: " mod_choice
         case "$mod_choice" in
             1)
+                if grep -q '^#txehq-bind-ip = ' "$user_conf"; then
+                    echo "此用户绑定了公网 IP。请新建目标端口的配置并测试后再删除旧配置；本次未修改。"
+                    return 1
+                fi
                 # 修改端口
                 while true; do
                     read -rp "请输入新端口号 (1-65535): " new_port

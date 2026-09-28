@@ -58,7 +58,7 @@ ensure_packages() {
 # --- 4. 执行主逻辑 ---
 ensure_packages "curl"
 
-DEBIAN_URL="https://snell.jinqians.com"
+DEBIAN_URL="https://raw.githubusercontent.com/txehq/snell.sh/main/snell.sh"
 CENTOS_URL="https://snell-centos.jinqians.com"
 ALPINE_URL="https://snell-docker.jinqians.com"
 

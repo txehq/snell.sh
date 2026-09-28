@@ -1,0 +1,30 @@
+name: Public IP profiles
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nftables iproute2 jq unzip
+      - name: Syntax and regression tests
+        run: |
+          for file in *.sh tests/*.sh; do bash -n "$file"; done
+          shellcheck ip-binding.sh manager.sh
+          bash tests/ip-binding.sh
+          python3 tests/menu.py
+      - name: Official Snell binaries
+        run: |
+          mkdir -p /tmp/snell-test-v5 /tmp/snell-test-v6
+          curl -fLsS --retry 3 https://dl.nssurge.com/snell/snell-server-v5.0.1-linux-amd64.zip -o /tmp/v5.zip
+          curl -fLsS --retry 3 https://dl.nssurge.com/snell/snell-server-v6.0.0rc2-linux-amd64.zip -o /tmp/v6.zip
+          unzip -o /tmp/v5.zip -d /tmp/snell-test-v5
+          unzip -o /tmp/v6.zip -d /tmp/snell-test-v6
+          chmod +x /tmp/snell-test-v*/snell-server
+      - name: Isolated Linux TCP/UDP source IP and Snell startup tests
+        run: |
+          sudo env SNELL_TEST_V5=/tmp/snell-test-v5/snell-server SNELL_TEST_V6=/tmp/snell-test-v6/snell-server unshare --net bash tests/network.sh
