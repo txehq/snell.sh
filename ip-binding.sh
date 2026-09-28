@@ -320,7 +320,8 @@ sip_bind() (
     if [[ $(realpath "${BASH_SOURCE[0]}") != "$SNELL_IP_HELPER" ]]; then
         install -m 755 "${BASH_SOURCE[0]}" "$SNELL_IP_HELPER"
     fi
-    # shellcheck disable=SC2329
+    # Trap callbacks are invoked indirectly (ShellCheck 0.9/0.11 use different codes).
+    # shellcheck disable=SC2329,SC2317
     rollback() {
         trap - ERR INT TERM
         systemctl stop "$service" || true
@@ -428,7 +429,8 @@ sip_add() (
     mkdir -p "$SNELL_IP_CONF/users"
     psk=$(openssl rand -hex 24)
     dns=$(sip_dns "$(sip_conf main)")
-    # shellcheck disable=SC2329
+    # Trap callbacks are invoked indirectly (ShellCheck 0.9/0.11 use different codes).
+    # shellcheck disable=SC2329,SC2317
     cleanup_new() {
         trap - ERR INT TERM
         systemctl stop "$service" || true
