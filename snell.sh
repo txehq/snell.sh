@@ -6,6 +6,25 @@
 # 描述: 这个脚本用于安装、卸载、查看和更新 Snell 代理
 # =========================================
 
+# txehq public-IP manager. Fetch to a private file and validate before execution.
+run_ip_manager() {
+    local payload result
+    payload=$(mktemp) || return 1
+    if ! curl -fLsS --retry 2 --connect-timeout 10 --max-time 60 \
+        https://raw.githubusercontent.com/txehq/snell.sh/main/ip-binding.sh -o "$payload" \
+        || ! test -s "$payload" || ! bash -n "$payload"; then
+        rm -f "$payload"
+        return 1
+    fi
+    bash "$payload" "$@"
+    result=$?
+    rm -f "$payload"
+    return "$result"
+}
+case "${1:-}" in
+    ips|bind-ip|add|profile|ip-menu) run_ip_manager "$@"; exit $? ;;
+esac
+
 # 定义颜色代码
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -14,7 +33,7 @@ CYAN='\033[0;36m'
 RESET='\033[0m'
 
 #当前版本号
-current_version="5.7"
+current_version="5.8"
 
 # 全局变量：选择的 Snell 版本
 SNELL_VERSION_CHOICE=""
@@ -426,6 +445,14 @@ generate_surge_config() {
     local version=$4
     local country=$5
     local installed_version=$6
+
+    local bound_ip
+    bound_ip=$(sed -n 's/^#txehq-bind-ip = //p' "$(snell_conf_for_port "$port")" 2>/dev/null | head -n1)
+    if [ -n "$bound_ip" ]; then
+        [[ "$ip_addr" == *:* ]] && return 0
+        ip_addr="$bound_ip"
+        country="Snell-${port}-${bound_ip}"
+    fi
 
     if [ "$installed_version" = "v6" ]; then
         # v6 版本：v6 协议（已移除 QUIC 模式与 obfs），mode 必须与服务端一致
@@ -2213,9 +2240,9 @@ fi
 # 下载并执行最新版本的脚本（带完整性校验：传输失败即停、非空、语法检查）
 echo -e "${CYAN}正在获取最新版本的管理脚本...${RESET}"
 TMP_SCRIPT=$(mktemp)
-if curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 https://raw.githubusercontent.com/jinqians/snell.sh/main/snell.sh -o "$TMP_SCRIPT" \
+if curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 https://raw.githubusercontent.com/txehq/snell.sh/main/snell.sh -o "$TMP_SCRIPT" \
     && [ -s "$TMP_SCRIPT" ] && bash -n "$TMP_SCRIPT" 2>/dev/null; then
-    bash "$TMP_SCRIPT"
+    bash "$TMP_SCRIPT" "$@"
     rm -f "$TMP_SCRIPT"
 else
     echo -e "${RED}下载或校验脚本失败，请检查网络连接。${RESET}"
@@ -2242,6 +2269,11 @@ EOFSCRIPT
 
 # 已安装 Snell v5/v6 的出口控制管理
 configure_v5_egress_control() {
+    if grep -q '^#txehq-bind-ip = ' "$SNELL_CONF_FILE" 2>/dev/null; then
+        echo "主配置已绑定公网 IP，不能同时切换为共享 netns 出口模式。"
+        return 1
+    fi
+
     echo -e "${CYAN}=============== v5/v6 出口控制设置 ===============${RESET}"
 
     if ! command -v snell-server &> /dev/null; then
@@ -2390,6 +2422,16 @@ uninstall_snell() {
             fi
         done
     fi
+
+    # Remove only this manager's per-profile source rules and drop-ins.
+    local binding profile
+    for binding in /etc/snell-ip-bindings/*.json; do
+        [ -f "$binding" ] || continue
+        profile=$(basename "$binding" .json)
+        /usr/local/lib/snell/ip-binding.sh cleanup "$profile" || return 1
+    done
+    rm -rf /etc/snell-ip-bindings
+    rm -f /usr/local/lib/snell/ip-binding.sh
 
     # 清理出口控制残留：netns / veth / nft 表 / FORWARD 规则 / /etc/netns（不存在时静默跳过）
     # 命名空间名以 netns 初始化脚本中的实际值为准（用户可能自定义过），取不到则用默认值
@@ -2965,6 +3007,10 @@ switch_conf_to_version() {
         return 1
     fi
 
+    if [[ "$target_version" == v4 ]] && grep -q '^#txehq-bind-ip = ' "$conf_file"; then
+        echo "公网 IP 绑定需要 Snell v5/v6，未切换到 v4。"
+        return 1
+    fi
     current_version=$(get_conf_snell_version "$conf_file")
     port=$(grep -E '^listen' "$conf_file" | sed -n 's/^[[:space:]]*listen[[:space:]]*=.*:\([0-9][0-9]*\).*/\1/p')
     if [ -z "$port" ]; then
@@ -3249,7 +3295,7 @@ update_script() {
     TMP_SCRIPT=$(mktemp)
 
     # 下载最新版本（带完整性校验）
-    if fetch_verified_script https://raw.githubusercontent.com/jinqians/snell.sh/main/snell.sh "$TMP_SCRIPT"; then
+    if fetch_verified_script https://raw.githubusercontent.com/txehq/snell.sh/main/snell.sh "$TMP_SCRIPT"; then
         # 获取新版本号
         new_version=$(grep -m1 -E '^current_version="' "$TMP_SCRIPT" | cut -d'"' -f2)
 
@@ -3367,7 +3413,7 @@ setup_multi_user() {
     echo -e "${CYAN}正在执行多用户管理脚本...${RESET}"
     local tmp_script
     tmp_script=$(mktemp)
-    if fetch_verified_script "https://raw.githubusercontent.com/jinqians/snell.sh/main/multi-user.sh" "$tmp_script"; then
+    if fetch_verified_script "https://raw.githubusercontent.com/txehq/snell.sh/main/multi-user.sh" "$tmp_script"; then
         bash "$tmp_script"
     else
         echo -e "${RED}多用户管理脚本下载校验失败，已取消执行。${RESET}"
@@ -3404,9 +3450,10 @@ show_menu() {
     _menu_row "3." "查看配置" 11 "9." "更新脚本"
     _menu_row "4." "重启服务" 11 "10." "查看服务状态"
     _menu_row "5." "ShadowTLS 管理" 5 "11." "Snell v5/v6 出口控制设置"
-    _menu_row "6." "BBR 管理" 11 "0." "退出脚本"
+    _menu_row "6." "BBR 管理" 11 "12." "公网 IP 配置 / 迁移"
+    _menu_row "0." "退出脚本" 11 "" ""
     echo -e "${CYAN}--------------------------------------------${RESET}"
-    if ! read -rp "请输入选项 [0-11]: " num; then
+    if ! read -rp "请输入选项 [0-12]: " num; then
         echo
         echo -e "${YELLOW}未读取到输入，已退出 Snell 菜单。${RESET}"
         exit 0
@@ -3420,7 +3467,7 @@ setup_bbr() {
     # 下载到本地校验通过后再执行
     local tmp_script
     tmp_script=$(mktemp)
-    if fetch_verified_script "https://raw.githubusercontent.com/jinqians/snell.sh/main/bbr.sh" "$tmp_script"; then
+    if fetch_verified_script "https://raw.githubusercontent.com/txehq/snell.sh/main/bbr.sh" "$tmp_script"; then
         bash "$tmp_script"
     else
         echo -e "${RED}BBR 脚本下载校验失败，已取消执行。${RESET}"
@@ -3437,7 +3484,7 @@ setup_shadowtls() {
     echo -e "${CYAN}正在执行 ShadowTLS 管理脚本...${RESET}"
     local tmp_script
     tmp_script=$(mktemp)
-    if fetch_verified_script "https://raw.githubusercontent.com/jinqians/snell.sh/main/shadowtls.sh" "$tmp_script"; then
+    if fetch_verified_script "https://raw.githubusercontent.com/txehq/snell.sh/main/shadowtls.sh" "$tmp_script"; then
         bash "$tmp_script"
     else
         echo -e "${RED}ShadowTLS 脚本下载校验失败，已取消执行。${RESET}"
@@ -3521,6 +3568,9 @@ while true; do
             check_and_show_status
             read -p "按任意键继续..." || exit 0
             ;;
+        12)
+            run_ip_manager ip-menu
+            ;;
         11)
             configure_v5_egress_control
             read -p "按任意键继续..." || exit 0
@@ -3530,7 +3580,7 @@ while true; do
             exit 0
             ;;
         *)
-            echo -e "${RED}请输入正确的选项 [0-11]${RESET}"
+            echo -e "${RED}请输入正确的选项 [0-12]${RESET}"
             ;;
     esac
     echo -e "\n${CYAN}按任意键返回主菜单...${RESET}"

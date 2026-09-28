@@ -1,3 +1,95 @@
+## Public IPv4 profiles (txehq fork, native Ubuntu/systemd)
+
+The native v5/v6 manager supports choosing a configured public IPv4 and its interface,
+including two addresses on the same interface. Both the listener and the proxy exit
+use the selected address. Existing profiles can be migrated without changing their
+port, PSK, Snell version, or v6 mode. New profiles receive independent random PSKs.
+
+### Upgrade an existing installation
+
+Replace only the launcher; this does not reinstall the server or modify profiles:
+
+```bash
+sudo apt-get install -y iproute2 jq nftables openssl
+(
+set -e
+payload=$(mktemp)
+trap 'rm -f "$payload"' EXIT
+curl -fLsS https://raw.githubusercontent.com/txehq/snell.sh/main/manager.sh -o "$payload"
+test -s "$payload"
+bash -n "$payload"
+sudo install -m 755 "$payload" /usr/local/bin/snell
+)
+```
+
+Stop if downloading or checking the script fails. The `snell` launcher now downloads
+management scripts from this fork. A fresh Ubuntu installation through this fork's
+`install.sh` also stays on the fork.
+
+### Keep existing clients and create a separate profile
+
+```bash
+sudo snell ips
+sudo snell bind-ip main 74.219.23.240
+# For an existing additional profile, use its port instead of main:
+# sudo snell bind-ip 6161 74.219.23.240
+
+sudo snell add --bind-ip 74.219.23.237
+sudo snell profile main
+# sudo snell profile NEW_PORT
+```
+
+`bind-ip` backs up configuration and the previous binding under
+`/etc/snell-ip-bindings/backups/`, preserves the original client settings, and briefly
+restarts that one service. A failed restart restores the prior configuration and
+binding, and attempts to recover the previous running service. An initially stopped
+service remains stopped on rollback. The first migration may add an explicit upstream
+DNS address when the original config relied on a local system stub.
+
+`add` chooses an unused port and follows the main profile's installed version. Optional
+`--port PORT` and `--version v5|v6` select these explicitly; the requested binary must
+already be installed. Without `--bind-ip`, a terminal displays the IP/interface picker.
+With multiple addresses, noninteractive commands require an explicit choice. Client
+configuration is printed with the selected IP; allow its TCP port through any host or
+provider firewall, and UDP on the same port for Snell v5 QUIC mode.
+
+The main menu's option **12** opens IP management. The multi-user **Add user** flow also
+offers this mode; choosing `n` keeps the legacy creation flow, including v4 support.
+Existing multi-user PSK/DNS changes and v5/v6 binary upgrades retain the IP binding.
+Changing a bound profile's port via the legacy port editor is rejected before making
+changes: create and test a new port first, then delete the old profile. Deletion removes
+its private source rules and systemd drop-in. Locked service accounts are retained to
+avoid accidental UID reuse.
+
+### How exact-IP egress works
+
+Snell's native `egress-interface` selects an interface, but cannot by itself choose
+between two IPv4 addresses on it. Each bound profile therefore has a dedicated service
+UID and a private nftables SNAT table matching only that UID. Unrelated services, Docker
+traffic, and sing-box are not matched. No host routes, default gateway, forwarding policy,
+or global firewall tables are replaced. A systemd drop-in installs the rules before
+starting Snell and reapplies them on restart/boot; it refuses startup when the selected
+address or interface is missing. After an administrator flushes custom nftables tables,
+restart the bound Snell services to restore their rules.
+
+Bound profiles use IPv4 DNS resolution and cannot create IPv6 sockets, preventing
+an alternate IPv6 proxy exit. Netlink remains available for the startup helper. Existing DNS servers must be reachable through the selected
+interface; loopback-only DNS settings require adjustment before migration. Profiles using
+v4, Docker, socket activation/network namespaces, or a ShadowTLS/loopback frontend are
+outside this feature and are rejected by the migration rather than silently reconfigured.
+
+This manager identifies profiles and units by port, so different profiles use **different
+ports**, even when their public IPs differ. `auto` selection avoids existing listeners and
+saved profiles. The provider must already have assigned/routed each IP and the OS must
+have configured it; the manager does not allocate IPs or edit Netplan.
+
+Verify each client through an IP-check website after migration. Automated checks:
+`bash tests/ip-binding.sh`, `python3 tests/menu.py`, and the CI's isolated Linux
+network test (TCP/UDP source addresses, incoming replies, rule restoration, and startup
+of official Snell v5/v6 binaries). The latter is not a Snell client-protocol implementation.
+
+---
+
 <div align="center">
 
 # Snell One-Click Script & Docker Image
