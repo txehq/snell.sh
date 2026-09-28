@@ -8,6 +8,8 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 . "$repo/ip-binding.sh"
 scratch=$(mktemp -d)
 chmod 755 "$scratch"
+probe=$scratch/network-echo.py
+install -m 644 "$repo/tests/network-echo.py" "$probe"
 processes=()
 cleanup_test() {
     for process in "${processes[@]}"; do kill "$process" 2>/dev/null || true; done
@@ -30,34 +32,34 @@ ip link set ens3 up
 nsenter -t "$peer" -n ip link set lo up
 nsenter -t "$peer" -n ip addr add 74.219.23.225/27 dev remote0
 nsenter -t "$peer" -n ip link set remote0 up
-nsenter -t "$peer" -n python3 "$repo/tests/network-echo.py" server 74.219.23.225 17880 &
+nsenter -t "$peer" -n python3 "$probe" server 74.219.23.225 17880 &
 processes+=("$!")
 sleep .3
 sip_apply_rules 41001 74.219.23.237
 sip_apply_rules 41002 74.219.23.240
 for protocol in tcp udp; do
     setpriv --reuid 41001 --regid 41001 --clear-groups --inh-caps +net_raw --ambient-caps +net_raw \
-        python3 "$repo/tests/network-echo.py" bound-client 74.219.23.225 17880 "$protocol" 74.219.23.237
+        python3 "$probe" bound-client 74.219.23.225 17880 "$protocol" 74.219.23.237
     setpriv --reuid 41002 --regid 41002 --clear-groups --inh-caps +net_raw --ambient-caps +net_raw \
-        python3 "$repo/tests/network-echo.py" bound-client 74.219.23.225 17880 "$protocol" 74.219.23.240
+        python3 "$probe" bound-client 74.219.23.225 17880 "$protocol" 74.219.23.240
 done
 # The host's ordinary processes must still use their normal source address.
-python3 "$repo/tests/network-echo.py" bound-client 74.219.23.225 17880 tcp 74.219.23.240
+python3 "$probe" bound-client 74.219.23.225 17880 tcp 74.219.23.240
 
 # Source NAT must not rewrite replies on existing inbound client connections.
 setpriv --reuid 41001 --regid 41001 --clear-groups \
-    python3 "$repo/tests/network-echo.py" server 74.219.23.240 17882 &
+    python3 "$probe" server 74.219.23.240 17882 &
 processes+=("$!")
 sleep .3
 for protocol in tcp udp; do
-    nsenter -t "$peer" -n python3 "$repo/tests/network-echo.py" client 74.219.23.240 17882 "$protocol" 74.219.23.225
+    nsenter -t "$peer" -n python3 "$probe" client 74.219.23.240 17882 "$protocol" 74.219.23.225
 done
 
 # Restore a removed table as ExecStartPre does after reboot/restart.
 sip_drop_rules 41001
 sip_apply_rules 41001 74.219.23.237
 setpriv --reuid 41001 --regid 41001 --clear-groups --inh-caps +net_raw --ambient-caps +net_raw \
-    python3 "$repo/tests/network-echo.py" bound-client 74.219.23.225 17880 tcp 74.219.23.237
+    python3 "$probe" bound-client 74.219.23.225 17880 tcp 74.219.23.237
 
 # Start official Snell binaries with the actual generated configuration. These
 # are startup/listener checks, not an implementation of Snell's client protocol.

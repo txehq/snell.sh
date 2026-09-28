@@ -243,7 +243,7 @@ sip_account() {
     id -u "$user"
 }
 sip_check_direct_service() {
-    local profile=$1 conf=$2 service namespace sockets command port binary output expected
+    local profile=$1 conf=$2 service namespace sockets command port binary output expected frontend
     service=$(sip_service "$profile")
     systemctl cat "$service" >/dev/null || { sip_error 'Existing Snell service not found.'; return 1; }
     namespace=$(systemctl show -p NetworkNamespacePath --value "$service") || return 1
@@ -268,6 +268,12 @@ sip_check_direct_service() {
     if [[ -f $SNELL_IP_UNITS/shadowtls-snell-$port.service ]]; then
         sip_error 'This profile has a ShadowTLS frontend; no changes made.'; return 1
     fi
+    for frontend in "$SNELL_IP_UNITS"/shadowtls*.service /lib/systemd/system/shadowtls*.service; do
+        [[ -f $frontend ]] || continue
+        if grep -Eq -- "--server[[:space:]]+(127\\.0\\.0\\.1|localhost|\\[::1\\]):${port}([[:space:]]|$)" "$frontend"; then
+            sip_error 'A ShadowTLS frontend depends on this loopback port; no changes made.'; return 1
+        fi
+    done
 }
 sip_healthy() {
     systemctl restart "$1" || return 1

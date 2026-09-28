@@ -11,11 +11,15 @@ Replace only the launcher; this does not reinstall the server or modify profiles
 
 ```bash
 sudo apt-get install -y iproute2 jq nftables openssl
+(
+set -e
 payload=$(mktemp)
+trap 'rm -f "$payload"' EXIT
 curl -fLsS https://raw.githubusercontent.com/txehq/snell.sh/main/manager.sh -o "$payload"
+test -s "$payload"
 bash -n "$payload"
 sudo install -m 755 "$payload" /usr/local/bin/snell
-rm -f "$payload"
+)
 ```
 
 Stop if downloading or checking the script fails. The `snell` launcher now downloads
