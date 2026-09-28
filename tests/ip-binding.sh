@@ -58,6 +58,8 @@ systemctl() {
             case $3 in
                 NetworkNamespacePath) printf '%s\n' "${TEST_NETNS:-}";;
                 Sockets) printf '%s\n' "${TEST_SOCKETS:-}";;
+                User) printf '%s\n' "${TEST_USER:-snell-ip-$profile}";;
+                RestrictAddressFamilies) printf '%s\n' "${TEST_FAMILIES:-AF_UNIX AF_INET AF_NETLINK}";;
                 ExecStart)
                     version=$(sip_version "$config")
                     printf '{ path=%s/snell-server-%s ; argv[]=%s/snell-server-%s -c %s ; }\n' "$SNELL_IP_BIN" "$version" "$SNELL_IP_BIN" "$version" "$config";;
@@ -158,6 +160,13 @@ reject_unsupported() {
     failure sip_version "$scratch/v4"
     failure sip_bind ../main 74.219.23.237
 }
+reject_conflicting_dropin() {
+    TEST_USER=snell
+    failure sip_ensure main
+    TEST_USER=''
+    TEST_FAMILIES='AF_UNIX AF_INET AF_INET6 AF_NETLINK'
+    failure sip_ensure main
+}
 ports() {
     failure sip_port_free 6160
     sip_port_free 25000
@@ -199,6 +208,7 @@ run idempotence-and-correct-export idempotent_and_export
 run restart-restores-source-rules restore_rules_on_start
 run failed-restart-rolls-back rollback
 run reject-unsupported-configurations reject_unsupported
+run reject-overriding-service-dropins reject_conflicting_dropin
 run avoid-existing-port-collisions ports
 run create-v5-v6-with-independent-credentials new_profiles
 run failed-create-cleans-up failed_new_profile

@@ -198,7 +198,7 @@ EOF
 # an unbound server. The root-owned metadata is outside /etc/snell because the
 # legacy manager recursively changes that directory's ownership.
 sip_ensure() {
-    local profile=$1 meta conf address iface account_uid user version
+    local profile=$1 meta conf address iface account_uid user version service families
     sip_id_valid "$profile" || return 1
     meta=$SNELL_IP_STATE/$profile.json
     [[ -f $meta && ! -L $meta ]] || return 1
@@ -209,6 +209,12 @@ sip_ensure() {
     account_uid=$(jq -er .uid "$meta") || return 1
     user=snell-ip-$profile
     [[ $(id -u "$user") == "$account_uid" ]] || return 1
+    service=$(sip_service "$profile")
+    # Later administrator drop-ins must not silently bypass the UID source rule
+    # or allow an IPv6 exit. Check systemd's effective values, not just our file.
+    [[ $(systemctl show -p User --value "$service") == "$user" ]] || return 1
+    families=$(systemctl show -p RestrictAddressFamilies --value "$service") || return 1
+    [[ $families && $families != *'~'* && $families != *AF_INET6* ]] || return 1
     sip_select "$address" || return 1
     [[ $SIP_INTERFACE == "$iface" ]] || return 1
     [[ $(sip_get "$conf" listen) == "$address:"* && $(sip_get "$conf" egress-interface) == "$iface" ]] || return 1
