@@ -1045,6 +1045,20 @@ get_all_ports() {
     done | sort -n | uniq
 }
 
+# Show saved listener/egress settings; these are not live exit-IP measurements.
+show_user_ip_binding() {
+    local conf_file="$1" listen_ip exit_ip interface
+    listen_ip=$(sed -nE 's/^[[:space:]]*listen[[:space:]]*=[[:space:]]*(.*)/\1/p' "$conf_file" | head -n 1)
+    listen_ip=${listen_ip%:*}
+    listen_ip=${listen_ip#\[}
+    listen_ip=${listen_ip%\]}
+    exit_ip=$(sed -nE 's/^[[:space:]]*#[[:space:]]*txehq-bind-ip[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\1/p' "$conf_file" | head -n 1)
+    interface=$(sed -nE 's/^[[:space:]]*egress-interface[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\1/p' "$conf_file" | head -n 1)
+    printf '监听 IP: %s\n' "${listen_ip:-未知}"
+    printf '配置出口 IPv4: %s\n' "${exit_ip:-自动（未记录固定 IP 绑定）}"
+    printf '出口接口: %s\n' "${interface:-系统选择}"
+}
+
 # 列出所有用户
 list_users() {
     echo -e "\n${YELLOW}=== 当前用户列表 ===${RESET}"
@@ -1059,6 +1073,7 @@ list_users() {
                 echo -e "${GREEN}用户 $count:${RESET}"
                 echo -e "端口: ${port}"
                 echo -e "版本: Snell ${version}"
+                show_user_ip_binding "$user_conf"
                 echo -e "PSK: ${psk}"
                 echo -e "配置文件: ${user_conf}\n"
             fi
@@ -1800,6 +1815,7 @@ show_user_config() {
         echo -e "${CYAN}--------------------------------${RESET}"
         echo -e "${YELLOW}端口: ${port}${RESET}"
         echo -e "${YELLOW}版本: Snell ${installed_version}${RESET}"
+        show_user_ip_binding "$user_conf"
         echo -e "${YELLOW}PSK: ${psk}${RESET}"
         [ -n "$mode" ] && echo -e "${YELLOW}模式 (mode): ${mode}${RESET}"
         [ -n "$dns_pref" ] && echo -e "${YELLOW}DNS 解析偏好: ${dns_pref}${RESET}"
