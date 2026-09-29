@@ -136,6 +136,12 @@ EOF
     sip_export 55261 > "$scratch/v6-export" 2>/dev/null
     [[ $(cat "$scratch/v6-export") == *'74.219.23.237, 55261, psk = existing-v6-PSK, version = 6, mode = unshaped'* ]]
     [[ $(wc -l < "$scratch/v6-export" | tr -d ' ') == 1 ]]
+    sed 's/74.219.23.237:55261/::0:55261/' "$(sip_conf 55261)" > "$scratch/v6-wildcard"
+    cp "$scratch/v6-wildcard" "$(sip_conf 55261)"
+    sip_export 55261 > "$scratch/v6-export" 2>/dev/null
+    [[ $(wc -l < "$scratch/v6-export" | tr -d ' ') == 2 ]]
+    grep -q 'version = 6, mode = unshaped' "$scratch/v6-export"
+    cmp "$scratch/v6-wildcard" "$(sip_conf 55261)"
     rm "$(sip_conf 55261)"
     failure sip_export 55555
 }
