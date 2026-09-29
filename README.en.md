@@ -39,6 +39,11 @@ sudo snell profile main
 # sudo snell profile NEW_PORT
 ```
 
+`profile` also exports older v5/v6 configurations without an IP-binding marker.
+For wildcard listeners it prints one client entry per discovered public IPv4; these
+are connection addresses, not a promise that traffic exits through that IP. Exporting
+is read-only. Use `bind-ip` separately when you want to pin the exit.
+
 `bind-ip` backs up configuration and the previous binding under
 `/etc/snell-ip-bindings/backups/`, preserves the original client settings, and briefly
 restarts that one service. A failed restart restores the prior configuration and

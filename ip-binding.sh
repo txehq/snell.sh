@@ -379,16 +379,44 @@ sip_port_free() {
     ! awk '{print $5}' <<<"$sockets" | grep -qE ":${port}$"
 }
 sip_export() {
-    local profile=$1 conf address port psk version mode
+    local profile=$1 conf address port psk version mode listen host candidates iface
+    local -a addresses=()
     sip_id_valid "$profile" || return 1
     conf=$(sip_conf "$profile")
+    [[ -r $conf ]] || { sip_error 'Profile config not found.'; return 1; }
+    listen=$(sip_get "$conf" listen)
+    port=${listen##*:}
+    psk=$(sip_get "$conf" psk)
+    [[ $port =~ ^[1-9][0-9]{0,4}$ && $port -le 65535 && $psk ]] || {
+        sip_error 'Profile must contain a valid listen port and PSK.'; return 1;
+    }
+    version=$(sip_version "$conf") || return 1
     address=$(sip_get "$conf" '#txehq-bind-ip')
-    [[ $address ]] || { sip_error 'This profile has not been bound to a public IP.'; return 1; }
-    port=$(sip_get "$conf" listen); port=${port##*:}
-    psk=$(sip_get "$conf" psk); version=$(sip_version "$conf") || return 1
-    printf 'Snell-%s-%s = snell, %s, %s, psk = %s, version = %s' "$profile" "$address" "$address" "$port" "$psk" "${version#v}"
-    if [[ $version == v6 ]]; then mode=$(sip_get "$conf" mode); printf ', mode = %s' "${mode:-default}"; fi
-    printf ', reuse = true, tfo = true\n'
+    if [[ $address ]]; then
+        addresses+=("$address")
+    else
+        # Older installer profiles have no binding marker. Export their actual
+        # listener(s) without rewriting the config, PSK, service, or exit rules.
+        host=${listen%:*}; host=${host#\[}; host=${host%\]}
+        case $host in
+            0.0.0.0|'*'|''|::|::0)
+                candidates=$(sip_ips) || return 1
+                while IFS=$'\t' read -r address iface; do
+                    [[ ! $address ]] || addresses+=("$address")
+                done <<<"$candidates"
+                ;;
+            *) addresses+=("$host");;
+        esac
+        [[ ${#addresses[@]} -gt 0 ]] || {
+            sip_error 'No public listener address could be discovered for this wildcard profile.'; return 1;
+        }
+        printf 'Existing profile: these are listener addresses. Exporting does not configure an exit IP; use bind-ip when a fixed exit is required.\n' >&2
+    fi
+    for address in "${addresses[@]}"; do
+        printf 'Snell-%s-%s = snell, %s, %s, psk = %s, version = %s' "$profile" "$address" "$address" "$port" "$psk" "${version#v}"
+        if [[ $version == v6 ]]; then mode=$(sip_get "$conf" mode); printf ', mode = %s' "${mode:-default}"; fi
+        printf ', reuse = true, tfo = true\n'
+    done
 }
 sip_cleanup() {
     local profile=$1 meta service account_uid

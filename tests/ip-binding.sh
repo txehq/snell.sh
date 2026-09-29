@@ -117,6 +117,28 @@ EOF
     [[ $(sip_get "$scratch/v6-rewritten" dns-ip-preference) == ipv4-only ]]
     grep -q '^preserve = value$' "$scratch/v6-rewritten"
 }
+export_existing_profiles() {
+    local before
+    before=$(cat "$(sip_conf main)")
+    sip_export main > "$scratch/legacy-export" 2> "$scratch/legacy-notice"
+    [[ $(wc -l < "$scratch/legacy-export" | tr -d ' ') == 2 ]]
+    grep -q '74.219.23.237, 6160, psk = original-PSK=with-equals, version = 5' "$scratch/legacy-export"
+    grep -q '74.219.23.240, 6160, psk = original-PSK=with-equals, version = 5' "$scratch/legacy-export"
+    [[ $(cat "$(sip_conf main)") == "$before" ]]
+    [[ ! -d $SNELL_IP_STATE ]]
+    cat > "$(sip_conf 55261)" <<'EOF'
+#version-choice = v6
+[snell-server]
+listen = 74.219.23.237:55261
+psk = existing-v6-PSK
+mode = unshaped
+EOF
+    sip_export 55261 > "$scratch/v6-export" 2>/dev/null
+    [[ $(cat "$scratch/v6-export") == *'74.219.23.237, 55261, psk = existing-v6-PSK, version = 6, mode = unshaped'* ]]
+    [[ $(wc -l < "$scratch/v6-export" | tr -d ' ') == 1 ]]
+    rm "$(sip_conf 55261)"
+    failure sip_export 55555
+}
 migrate() {
     sip_bind main 74.219.23.240 >/dev/null
     [[ $(sip_get "$(sip_conf main)" psk) == 'original-PSK=with-equals' ]]
@@ -203,6 +225,7 @@ failed_new_profile() {
 if [[ ${1:-} == --menu ]]; then sip_select ''; printf 'SELECTED=%s@%s\n' "$SIP_ADDRESS" "$SIP_INTERFACE"; exit; fi
 run public-ip-discovery discovery
 run preserve-credentials-and-v6-mode rewrite
+run export-existing-unbound-v5-v6-without-mutation export_existing_profiles
 run migrate-existing-profile migrate
 run idempotence-and-correct-export idempotent_and_export
 run restart-restores-source-rules restore_rules_on_start
