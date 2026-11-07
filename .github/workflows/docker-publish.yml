@@ -208,7 +208,7 @@ jobs:
             SHADOWTLS_VERSION=${{ env.SHADOWTLS_VERSION }}
             BUILD_CREATED=${{ github.event.repository.updated_at }}
           cache-from: type=gha,scope=${{ matrix.channel }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.channel }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.channel }},ignore-error=true
 
   # 全量构建：单机串行，按 v4 -> v5 -> v6 顺序、通道内版本号递增依次推送，
   # 使 Docker Hub 上的标签更新时间与版本顺序一致，最后再打 latest
@@ -262,7 +262,7 @@ jobs:
               --build-arg "SHADOWTLS_VERSION=${SHADOWTLS_VERSION}" \
               --build-arg "BUILD_CREATED=${BUILD_CREATED}" \
               --cache-from "type=gha,scope=${channel}" \
-              --cache-to "type=gha,mode=max,scope=${channel}" \
+              --cache-to "type=gha,mode=max,scope=${channel},ignore-error=true" \
               ${tag_args} \
               --push \
               .
